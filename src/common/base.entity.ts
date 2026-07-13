@@ -30,6 +30,12 @@ export abstract class CommonFields extends BaseEntity {
   })
   deletedAt?: Date;
 
+  @Column({ name: 'created_by', type: 'bigint', nullable: true })
+  createdBy?: string;
+
+  @Column({ name: 'updated_by', type: 'bigint', nullable: true })
+  updatedBy?: string;
+
   @Column({ name: 'status', type: 'boolean', default: true })
   status!: boolean;
 }
