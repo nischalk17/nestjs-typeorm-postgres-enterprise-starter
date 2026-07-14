@@ -4,11 +4,11 @@ export enum UserRoleENUM {
   USER = 'user',
 }
 
-export enum MediaTypeEnum {
-  VIDEO = 'video',
+export enum FileCategory {
   IMAGE = 'image',
+  VIDEO = 'video',
+  AUDIO = 'audio',
   DOCUMENT = 'document',
-  PDF = 'pdf',
 }
 
 export enum SortOrder {

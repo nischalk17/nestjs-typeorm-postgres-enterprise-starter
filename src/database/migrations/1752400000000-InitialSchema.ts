@@ -20,8 +20,7 @@ export class InitialSchema1752400000000 implements MigrationInterface {
         "email" VARCHAR(255) NOT NULL,
         "password" TEXT NOT NULL,
         "hashed_refresh_token" TEXT,
-        "role" "public"."t_users_role_enum" NOT NULL DEFAULT 'user',
-        CONSTRAINT "UQ_t_users_email" UNIQUE ("email")
+        "role" "public"."t_users_role_enum" NOT NULL DEFAULT 'user'
       )
     `);
     await queryRunner.query(
@@ -31,9 +30,6 @@ export class InitialSchema1752400000000 implements MigrationInterface {
       `CREATE INDEX "idx_user_role" ON "t_users" ("role")`,
     );
 
-    await queryRunner.query(
-      `CREATE TYPE "public"."t_media_media_type_enum" AS ENUM('video', 'image', 'document', 'pdf')`,
-    );
     await queryRunner.query(`
       CREATE TABLE "t_media" (
         "id" BIGSERIAL PRIMARY KEY,
@@ -43,15 +39,17 @@ export class InitialSchema1752400000000 implements MigrationInterface {
         "created_by" BIGINT,
         "updated_by" BIGINT,
         "status" BOOLEAN NOT NULL DEFAULT true,
-        "media_type" "public"."t_media_media_type_enum" NOT NULL,
-        "url" VARCHAR(300) NOT NULL
+        "file_category" VARCHAR(20) NOT NULL,
+        "url" VARCHAR(300) NOT NULL,
+        "original_name" VARCHAR(255) NOT NULL,
+        "file_size" INTEGER NOT NULL,
+        "mime_type" VARCHAR(100) NOT NULL
       )
     `);
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`DROP TABLE "t_media"`);
-    await queryRunner.query(`DROP TYPE "public"."t_media_media_type_enum"`);
 
     await queryRunner.query(`DROP INDEX "public"."idx_user_role"`);
     await queryRunner.query(`DROP INDEX "public"."idx_user_email"`);

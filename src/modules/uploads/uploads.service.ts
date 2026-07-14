@@ -4,21 +4,27 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as fs from 'fs';
 import * as path from 'path';
-import { MediaTypeEnum } from 'src/common/enums';
+import { FileCategory } from 'src/common/enums';
 import { In, Repository } from 'typeorm';
+import { MediaResponseDto } from './dto/media-response.dto';
+import { MEDIA_SUBDIR } from './uploads.constants';
 import { Media } from './entities/media.entity';
+
+export type MediaResponse = MediaResponseDto;
 
 @Injectable()
 export class UploadsService {
   constructor(
     @InjectRepository(Media)
     private readonly mediaRepository: Repository<Media>,
+    private readonly configService: ConfigService,
   ) {}
 
-  async findOrFail(id: string) {
+  async findOrFail(id: string): Promise<Media> {
     const media = await this.mediaRepository.findOne({ where: { id } });
     if (!media) {
       throw new NotFoundException('Media not found');
@@ -28,40 +34,65 @@ export class UploadsService {
 
   /** Single reusable helper other modules can call to persist an uploaded file. */
   async saveFile(file: Express.Multer.File): Promise<Media> {
-    const type = this.resolveMediaType(file.mimetype);
-    const media = this.mediaRepository.create({
-      type,
-      url: `/uploads/${file.filename}`,
-    });
-    return this.mediaRepository.save(media);
+    try {
+      const fileCategory = this.resolveFileCategory(file.mimetype);
+      const media = this.mediaRepository.create({
+        fileCategory,
+        url: `/uploads/${MEDIA_SUBDIR}/${file.filename}`,
+        originalName: file.originalname,
+        fileSize: file.size,
+        mimeType: file.mimetype,
+      });
+      return await this.mediaRepository.save(media);
+    } catch (error) {
+      // Multer already wrote the file to disk by this point (fileFilter ran
+      // before this method); if categorization or the DB write fails, remove
+      // it instead of leaving an orphaned, DB-untracked file behind.
+      if (fs.existsSync(file.path)) {
+        fs.unlinkSync(file.path);
+      }
+      throw error;
+    }
   }
 
-  async handleFileUpload(file: Express.Multer.File) {
+  async handleFileUpload(file: Express.Multer.File): Promise<MediaResponse> {
     const media = await this.saveFile(file);
-    return {
-      message: 'File uploaded successfully',
-      data: { id: media.id, type: media.type, url: media.url },
-    };
+    return this.toResponse(media);
   }
 
-  async handleMultipleFileUpload(files: Array<Express.Multer.File>) {
-    const data = await Promise.all(files.map((file) => this.saveFile(file)));
-    return { message: 'Files uploaded successfully', data };
+  async handleMultipleFileUpload(
+    files: Array<Express.Multer.File>,
+  ): Promise<MediaResponse[]> {
+    const saved = await Promise.all(files.map((file) => this.saveFile(file)));
+    return saved.map((media) => this.toResponse(media));
   }
 
-  async removeMedia(id: string) {
+  async removeMedia(id: string): Promise<{ success: boolean }> {
     const media = await this.findOrFail(id);
 
-    const filePath = path.join(process.cwd(), media.url);
+    const filePath = this.resolvePhysicalPath(media);
     if (fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
     }
 
     await this.mediaRepository.softDelete(media.id);
-    return { message: 'Media deleted successfully', success: true };
+    return { success: true };
   }
 
-  async getByIds(ids: string[], failOn404: boolean = false) {
+  /**
+   * `media.url` is a public URL path (always `/uploads/media/<file>`,
+   * independent of storage location). The physical file, however, lives
+   * under the configured `upload.dir` (UPLOAD_DIR), which may differ from
+   * the default — resolve against that config, not `media.url` directly,
+   * or deletes silently no-op when UPLOAD_DIR is customized.
+   */
+  private resolvePhysicalPath(media: Media): string {
+    const uploadDir = this.configService.get<string>('upload.dir', './uploads');
+    const filename = path.basename(media.url);
+    return path.resolve(uploadDir, MEDIA_SUBDIR, filename);
+  }
+
+  async getByIds(ids: string[], failOn404 = false): Promise<Media[]> {
     const existingData = await this.mediaRepository.find({
       where: { id: In(ids) },
     });
@@ -71,22 +102,40 @@ export class UploadsService {
     return existingData;
   }
 
-  async getById(id: string) {
-    return this.findOrFail(id);
+  async getById(id: string): Promise<MediaResponse> {
+    return this.toResponse(await this.findOrFail(id));
   }
 
-  private resolveMediaType(mimetype: string): MediaTypeEnum {
-    if (mimetype.startsWith('image/')) return MediaTypeEnum.IMAGE;
-    if (mimetype === 'application/pdf') return MediaTypeEnum.PDF;
+  private toResponse(media: Media): MediaResponse {
+    const baseUrl = this.configService.get<string>('app.baseUrl', '');
+    return {
+      id: media.id,
+      url: `${baseUrl}${media.url}`,
+      originalName: media.originalName,
+      fileSize: media.fileSize,
+      fileSizeMb: Math.round((media.fileSize / (1024 * 1024)) * 100) / 100,
+      mimeType: media.mimeType,
+      fileCategory: media.fileCategory,
+    };
+  }
+
+  private resolveFileCategory(mimetype: string): FileCategory {
+    if (mimetype.startsWith('image/')) return FileCategory.IMAGE;
+    if (mimetype.startsWith('video/')) return FileCategory.VIDEO;
+    if (mimetype.startsWith('audio/')) return FileCategory.AUDIO;
     if (
+      mimetype === 'application/pdf' ||
       mimetype === 'application/msword' ||
       mimetype ===
         'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
     )
-      return MediaTypeEnum.DOCUMENT;
+      return FileCategory.DOCUMENT;
 
+    // Reachable if UPLOAD_ALLOWED_MIMETYPES is extended with a type not
+    // categorized above — keep this in sync with FileCategory whenever the
+    // allowlist grows.
     throw new HttpException(
-      'Unsupported file format! Only images, PDFs, and Word documents are allowed.',
+      `Unrecognized media category for MIME type "${mimetype}".`,
       HttpStatus.BAD_REQUEST,
     );
   }

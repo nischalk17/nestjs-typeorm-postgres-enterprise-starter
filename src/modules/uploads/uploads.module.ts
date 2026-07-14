@@ -1,11 +1,13 @@
-import { Module } from '@nestjs/common';
+import { Module, UnsupportedMediaTypeException } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MulterModule } from '@nestjs/platform-express';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
+import * as fs from 'fs';
 import { diskStorage } from 'multer';
-import { extname } from 'path';
+import { extname, join } from 'path';
 import { Media } from './entities/media.entity';
+import { MEDIA_SUBDIR } from './uploads.constants';
 import { UploadsController } from './uploads.controller';
 import { UploadsService } from './uploads.service';
 
@@ -21,12 +23,15 @@ import { UploadsService } from './uploads.service';
           maxSizeMb: number;
           allowedMimetypes: string[];
         }>('upload')!;
+        const destinationDir = join(upload.dir, MEDIA_SUBDIR);
+        fs.mkdirSync(destinationDir, { recursive: true });
+
         return {
           storage: diskStorage({
-            destination: upload.dir,
+            destination: destinationDir,
             filename: (_, file, cb) => {
               const ext = extname(file.originalname).toLowerCase();
-              cb(null, `${randomUUID()}${ext}`);
+              cb(null, `${Date.now()}-${randomUUID()}${ext}`);
             },
           }),
           limits: { fileSize: upload.maxSizeMb * 1024 * 1024 },
@@ -34,7 +39,14 @@ import { UploadsService } from './uploads.service';
             if (upload.allowedMimetypes.includes(file.mimetype)) {
               cb(null, true);
             } else {
-              cb(new Error('Unsupported file type'), false);
+              // Must be an HttpException (not a bare Error) so the global
+              // exception filter maps it to a proper 4xx instead of a 500.
+              cb(
+                new UnsupportedMediaTypeException(
+                  `Unsupported file type "${file.mimetype}". Allowed: ${upload.allowedMimetypes.join(', ')}`,
+                ),
+                false,
+              );
             }
           },
         };
