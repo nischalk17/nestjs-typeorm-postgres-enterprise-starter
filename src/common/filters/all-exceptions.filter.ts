@@ -7,6 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
+import { MulterError } from 'multer';
 import { QueryFailedError } from 'typeorm';
 import { IErrorResponse } from '../interfaces';
 
@@ -15,6 +16,17 @@ const PG_UNIQUE_VIOLATION = '23505';
 const PG_FOREIGN_KEY_VIOLATION = '23503';
 const PG_NOT_NULL_VIOLATION = '23502';
 const PG_CHECK_VIOLATION = '23514';
+
+/** Human-readable messages for Multer's upload-time error codes. */
+const MULTER_ERROR_MESSAGES: Record<string, string> = {
+  LIMIT_FILE_SIZE: 'Uploaded file exceeds the maximum allowed size',
+  LIMIT_FILE_COUNT: 'Too many files uploaded',
+  LIMIT_UNEXPECTED_FILE: 'Unexpected file field in upload',
+  LIMIT_PART_COUNT: 'Too many parts in multipart upload',
+  LIMIT_FIELD_KEY: 'Field name too long',
+  LIMIT_FIELD_VALUE: 'Field value too long',
+  LIMIT_FIELD_COUNT: 'Too many fields',
+};
 
 /** Single canonical exception filter emitting the standard error envelope. */
 @Catch()
@@ -70,6 +82,11 @@ export class AllExceptionsFilter implements ExceptionFilter {
       this.logger.warn(
         `QueryFailedError on ${request.method} ${request.url}: ${exception.message}`,
       );
+    } else if (exception instanceof MulterError) {
+      // Thrown directly by Multer (e.g. file-size limit) before Nest's
+      // exception layer sees it — not an HttpException by default.
+      status = HttpStatus.BAD_REQUEST;
+      message = MULTER_ERROR_MESSAGES[exception.code] ?? exception.message;
     } else {
       status = HttpStatus.INTERNAL_SERVER_ERROR;
       message = 'Internal server error';

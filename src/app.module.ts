@@ -4,7 +4,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { join } from 'path';
+import { resolve } from 'path';
 import appConfig from './config/app.config';
 import databaseConfig from './config/database.config';
 import jwtConfig from './config/jwt.config';
@@ -70,13 +70,20 @@ import { UserModule } from './modules/users/user.module';
     TypeOrmModule.forRootAsync({
       useFactory: () => buildDataSourceOptions(),
     }),
-    ServeStaticModule.forRoot({
-      rootPath: join(__dirname, '..', 'uploads'),
-      serveRoot: '/uploads',
-      serveStaticOptions: {
-        index: false,
-        dotfiles: 'deny',
-      },
+    ServeStaticModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => [
+        {
+          // Must match `upload.dir` (UPLOAD_DIR) exactly — this is where
+          // UploadsModule's Multer storage actually writes files.
+          rootPath: resolve(config.get<string>('upload.dir', './uploads')),
+          serveRoot: '/uploads',
+          serveStaticOptions: {
+            index: false,
+            dotfiles: 'deny',
+          },
+        },
+      ],
     }),
     ThrottlerModule.forRootAsync({
       inject: [ConfigService],

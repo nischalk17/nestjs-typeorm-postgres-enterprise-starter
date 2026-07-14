@@ -8,8 +8,12 @@ export class User extends CommonFields {
   @Column({ nullable: false, type: 'varchar', length: 100 })
   fullname!: string;
 
+  // Uniqueness is enforced solely by the explicit `idx_user_email` index
+  // below — do not also set `unique: true` here, or TypeORM's schema sync/
+  // migration-generation will see two separate unique constraints on the
+  // same column (one auto-named `UQ_...`, one this named index) and drift.
   @Index('idx_user_email', { unique: true })
-  @Column({ nullable: false, type: 'varchar', length: 255, unique: true })
+  @Column({ nullable: false, type: 'varchar', length: 255 })
   email!: string;
 
   // `select: false` keeps it out of default queries; `@Exclude()` is defense
